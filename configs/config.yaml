@@ -3,8 +3,7 @@ log_level: debug
 watch:
   dirs:
     - ./test_uploads
-  ignore:
-    - ./test_uploads/cache
+  ignore: []
 
 alerts:
   stdout: true

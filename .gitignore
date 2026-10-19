@@ -9,3 +9,43 @@ bin/
 *.tmp
 .idea/
 .vscode/
+
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go test/build artifacts
+*.test
+*.out
+coverage.out
+
+# Local configs
+configs/config.local.yaml
+configs/config.debug.yaml
+configs/config.tmp.yaml
+
+# Secrets
+.env
+*.env
+
+# Logs
+logs/
+*.log
+
+# Runtime files
+*.pid
+
+# Test generated files
+test_uploads/
+!test_uploads/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

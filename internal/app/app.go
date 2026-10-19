@@ -12,14 +12,14 @@ import (
 
 type App struct {
 	log      *slog.Logger
-	watcher  watcher.Watcher
+	watcher  *watcher.FSNotify
 	rules    *rules.Registry
 	alerters []alert.Alerter
 }
 
 func New(
 	log *slog.Logger,
-	w watcher.Watcher,
+	w *watcher.FSNotify,
 	registry *rules.Registry,
 	alerters ...alert.Alerter,
 ) *App {

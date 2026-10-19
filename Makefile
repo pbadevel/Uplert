@@ -1,18 +1,22 @@
-.PHONY: run run-debug build tidy fmt
+.PHONY: run run-debug build test-agent test-agent-loop clean tidy fmt
 
 run:
 	go run ./cmd/uplert --config configs/config.yaml
 
 run-debug:
-	@echo "Running in DEBUG mode..."
-	@cp configs/config.yaml configs/config.tmp.yaml
-	@sed 's/log_level: .*/log_level: debug/' configs/config.tmp.yaml > configs/config.yaml
-	@go run ./cmd/uplert --config configs/config.yaml
-	@sed 's/log_level: debug/log_level: info/' configs/config.yaml > configs/config.tmp.yaml
-	@mv configs/config.tmp.yaml configs/config.yaml
+	UPLERT_LOG_LEVEL=debug go run ./cmd/uplert --config configs/config.yaml
 
 build:
-	go build -o bin/uplert ./cmd/uplert
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/uplert ./cmd/uplert
+
+test-agent:
+	go run ./cmd/testagent -dir ./test_uploads -once -clean
+
+test-agent-loop:
+	go run ./cmd/testagent -dir ./test_uploads -interval 3s -step-delay 200ms
+
+clean:
+	rm -rf bin test_uploads configs/config.tmp.yaml configs/config.debug.yaml
 
 tidy:
 	go mod tidy
