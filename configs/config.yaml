@@ -1,0 +1,11 @@
+log_level: debug
+
+watch:
+  dirs:
+    - ./test_uploads
+  ignore:
+    - ./test_uploads/cache
+
+alerts:
+  stdout: true
+  webhook: ""
