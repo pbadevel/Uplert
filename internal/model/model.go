@@ -20,6 +20,7 @@ const (
 	OpRename Op = "rename"
 	OpRemove Op = "remove"
 	OpChmod  Op = "chmod"
+	OpScan   Op = "scan"
 )
 
 type FileEvent struct {
@@ -35,4 +36,13 @@ type Finding struct {
 	Message string
 	Path    string
 	Time    time.Time
+}
+
+type ProcessEvent struct {
+	Pid        int32
+	Name       string
+	Exe        string
+	ParentPid  int32
+	ParentName string
+	Time       time.Time
 }

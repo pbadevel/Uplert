@@ -1,0 +1,25 @@
+[Unit]
+Description=Uplert - lightweight webshell & RCE aftermath detector
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/uplert run --config /etc/uplert/config.yaml
+Restart=on-failure
+RestartSec=5
+# generous but bounded inotify limits are needed on big trees
+LimitNOFILE=65536
+
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-/var/lib/uplert
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

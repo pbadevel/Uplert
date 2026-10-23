@@ -16,11 +16,14 @@ func (r DangerousExtension) ID() string {
 }
 
 func (r DangerousExtension) Evaluate(ev model.FileEvent) []model.Finding {
-	if ev.Op != model.OpCreate && ev.Op != model.OpRename {
+	if ev.Op != model.OpCreate &&
+		ev.Op != model.OpRename &&
+		ev.Op != model.OpScan {
 		return nil
 	}
 
 	ext := strings.ToLower(filepath.Ext(ev.Path))
+
 	if !r.Exts[ext] {
 		return nil
 	}

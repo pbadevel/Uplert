@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,12 @@ import (
 	"github.com/pbadevel/Uplert/internal/model"
 )
 
+type Watcher interface {
+	Run(ctx context.Context, events chan<- model.FileEvent) error
+}
+
 type FSNotify struct {
+	log    *slog.Logger
 	dirs   []string
 	ignore []string
 
@@ -22,8 +28,9 @@ type FSNotify struct {
 	watched map[string]struct{}
 }
 
-func NewFSNotify(dirs []string, ignore []string) *FSNotify {
+func NewFSNotify(log *slog.Logger, dirs []string, ignore []string) *FSNotify {
 	return &FSNotify{
+		log:     log,
 		dirs:    dirs,
 		ignore:  ignore,
 		watched: make(map[string]struct{}),
@@ -41,6 +48,8 @@ func (w *FSNotify) Run(ctx context.Context, events chan<- model.FileEvent) error
 		dir = filepath.Clean(dir)
 
 		if err := w.addRecursive(fw, dir); err != nil {
+			// Startup errors on configured dirs are fatal: the user
+			// explicitly asked to watch them.
 			return fmt.Errorf("watch dir %s: %w", dir, err)
 		}
 	}
@@ -68,18 +77,21 @@ func (w *FSNotify) Run(ctx context.Context, events chan<- model.FileEvent) error
 
 			isDir := false
 
-			if op == model.OpCreate ||
-				op == model.OpWrite ||
-				op == model.OpChmod {
+			if op == model.OpCreate || op == model.OpWrite || op == model.OpChmod {
 				info, err := os.Stat(path)
 				if err == nil {
 					isDir = info.IsDir()
 				}
+				// A file created and instantly removed: not a failure.
 			}
 
 			if op == model.OpCreate && isDir {
+				// Runtime errors must not kill the whole agent.
 				if err := w.addRecursive(fw, path); err != nil {
-					return fmt.Errorf("add recursive watch for %s: %w", path, err)
+					w.log.Warn("cannot watch created directory",
+						"path", path,
+						"error", err,
+					)
 				}
 			}
 
@@ -88,7 +100,7 @@ func (w *FSNotify) Run(ctx context.Context, events chan<- model.FileEvent) error
 			}
 
 			if op == model.OpRemove || op == model.OpRename {
-				w.forget(path)
+				w.forget(fw, path)
 			}
 
 			fileEvent := model.FileEvent{
@@ -107,7 +119,10 @@ func (w *FSNotify) Run(ctx context.Context, events chan<- model.FileEvent) error
 				return nil
 			}
 
-			return fmt.Errorf("fsnotify error: %w", err)
+			// Overflow and other inotify errors are logged, not fatal:
+			// a security agent must stay alive. The fallback scanner
+			// covers missed events.
+			w.log.Warn("fsnotify error", "error", err)
 		}
 	}
 }
@@ -174,7 +189,9 @@ func (w *FSNotify) isIgnored(path string) bool {
 	return false
 }
 
-func (w *FSNotify) forget(path string) {
+// forget drops a (sub)tree from the watched set and removes it from
+// fsnotify so watches do not leak after moves and deletions.
+func (w *FSNotify) forget(fw *fsnotify.Watcher, path string) {
 	path = filepath.Clean(path)
 
 	w.mu.Lock()
@@ -190,9 +207,12 @@ func (w *FSNotify) forget(path string) {
 
 	for watchedPath := range w.watched {
 		if strings.HasPrefix(watchedPath, prefix) {
+			_ = fw.Remove(watchedPath)
 			delete(w.watched, watchedPath)
 		}
 	}
+
+	_ = fw.Remove(path)
 }
 
 func (w *FSNotify) send(

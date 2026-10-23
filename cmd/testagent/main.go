@@ -115,14 +115,20 @@ func main() {
 			0o644,
 		)
 
-		htaccess := filepath.Join(*dir, fmt.Sprintf(".htaccess_%d", round))
+		confDir := filepath.Join(*dir, fmt.Sprintf("conf_%d", round))
+		if err := os.MkdirAll(confDir, 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "mkdir conf dir:", err)
+			return
+		}
+
+		htaccess := filepath.Join(confDir, ".htaccess")
 		writeFile(
 			htaccess,
 			"php_value auto_prepend_file uplert-test.conf\n",
 			0o644,
 		)
 
-		userIni := filepath.Join(*dir, fmt.Sprintf(".user.ini_%d", round))
+		userIni := filepath.Join(confDir, ".user.ini")
 		writeFile(
 			userIni,
 			"auto_prepend_file = uplert-test.php\n",

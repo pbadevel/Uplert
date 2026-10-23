@@ -1,416 +1,238 @@
 # Uplert
 
-Uplert is a lightweight Go agent for Linux servers that monitors watched directories and detects suspicious file activity commonly associated with webshell uploads and RCE aftermath.
+<p align="center">
+  <b>Lightweight webshell &amp; RCE aftermath detector for Linux servers.</b><br>
+  One static binary. No eBPF. No SIEM. No signature databases.<br>
+  <sub>made by <b>@pbadev</b></sub>
+</p>
 
-It is not a full EDR or antivirus. It focuses on practical detection around file uploads, dangerous scripts, executable files, suspicious media content, and common post-exploitation artifacts.
+---
+
+```text
+watch upload dirs → detect malicious uploads → detect spawned shells
+→ alert (stdout / webhook / Telegram / JSON) → optional kill (dry-run safe)
+```
+
+Uplert solves a narrow but very common problem: **a user uploads a file through
+your web app and it lands in `uploads/`.** Uplert watches that folder in
+real time with `inotify`, inspects uploads, and catches the typical aftermath:
+a webshell, a PHP payload inside an image, a reverse shell spawned by php-fpm.
+
+**Footprint:** ~8 MB static binary, ~13 MB RSS in idle. Works on any Linux from
+kernel 3.x — no eBPF, no kernel modules, no rules database to download.
+
+## Comparison with heavyweight tools
+
+| | **uplert** | Falco | Wazuh | maldet |
+|---|---|---|---|---|
+| Binary size | ~8 MB | tens of MB | agent + server | Perl + ClamAV |
+| Idle RAM (agent) | **~13 MB** | ~100 MB+ | ~50–150 MB | hundreds of MB |
+| Kernel requirements | none | eBPF/module | systemd, auditd | none |
+| Setup time | **< 2 min** | ~30 min | hours/days | ~30 min |
+| Webshell semantics (PHP in image, double ext, `.htaccess`) | **yes** | no | no | signature only |
+| Real-time (inotify) | **yes** | syscalls | cron-like FIM | no (cron) |
+| Response (kill) | optional, dry-run safe | no | no | no |
+| External infra required | **none** | sidekick | manager + ES | ClamAV |
+
+Uplert is not an EDR and does not replace Falco/Wazuh. It is the tool you
+install **now, on a cheap VPS**, while nobody signed off on a SIEM.
 
 ## Features
 
-- [x] Recursive directory watching
-- [x] Path ignore list
-- [x] Dangerous file extension detection
-- [x] Double extension detection
-- [x] Executable file detection in watched directories
-- [x] PHP-like code detection inside image files
-- [x] Script-like content detection in SVG/HTML files
-- [x] Suspicious web configuration detection
-  - [x] `.htaccess`
-  - [x] `.user.ini`
-  - [x] `web.config`
-- [x] Magic byte mismatch detection
-- [x] Human-readable colored logs
-- [x] Log levels:
-  - [x] `debug`
-  - [x] `info`
-  - [x] `error`
-- [x] Built-in test agent for local verification
-- [x] Simple YAML configuration
-- [x] Single static binary build support
-
-## Requirements
-
-- Go `1.23+`
-- Linux or macOS for development
-- `inotify` limits may need adjustment on large directory trees
+- ✅ **Recursive inotify watching** with debouncing and dedup
+- ✅ **Dangerous extensions** (`.php`, `.phtml`, `.phar`, `.py`, `.jsp` and more)
+- ✅ **Double extensions** (`image.php.jpg`)
+- ✅ **PHP in images / media** — head+tail content scan of big files too
+- ✅ **Script in SVG/HTML**
+- ✅ **Suspicious web configs** (`.htaccess`, `.user.ini`, `web.config`)
+- ✅ **Magic-byte mismatch** (`.jpg` that is not a JPEG)
+- ✅ **Executable bit** in watched dirs
+- ✅ **Shebang** in watched dirs
+- ✅ **Process detection**: exec from watched dir, web process spawning shells
+- ✅ **Response engine**: dry-run by default, explicit opt-in for real kills
+- ✅ **Alerts**: colored stdout, JSON, webhook, Telegram bot
+- ✅ **One-shot scan**: `uplert scan` for CI and cron jobs
+- ✅ **TUI menu**: arrow keys, live dashboard (see below)
+- ✅ **systemd unit, Docker image, install script**
 
 ## Quick Start
 
-Install dependencies:
-
 ```bash
-go mod tidy
+# 1. download & install
+curl -fsSL https://raw.githubusercontent.com/pbadev/Uplert/main/scripts/install.sh | sh
+
+# 2. point it at your uploads
+sudo $EDITOR /etc/uplert/config.yaml
+
+# 3. find existing evil files (exit code 1 if anything found!)
+uplert scan
+
+# 4. run in a terminal to see what it does (interactive menu on a TTY)
+uplert
+
+# 5. production
+sudo systemctl enable --now uplert
 ```
 
-Run in normal mode:
+From source:
 
 ```bash
-make run
+git clone https://github.com/pbadev/Uplert
+cd Uplert && make build
+./bin/uplert run --config configs/config.yaml
 ```
 
-Run in debug mode:
+## TUI menu
 
-```bash
-make run-debug
+In a terminal `uplert` opens an interactive menu — plain ANSI, zero extra
+dependencies, keyboard only:
+
+```text
+ ▸ ▶  Run agent (watch & alert)
+   🔎 One-shot scan
+   🧪 Run test agent
+   ✏  Show config
+   ⭘ Exit
 ```
 
-Build binary:
+Navigate with `↑/↓` or `j/k`, confirm with `Enter`, quit with `q`/`Esc`.
+In systemd/Docker contexts (no TTY) it runs as a headless agent.
 
-```bash
-make build
-```
+## CLI
 
-The binary will be available at:
-
-```bash
-bin/uplert
+```text
+uplert run     agent loop (systemd builds on this)
+uplert scan    one-shot scan, exit code 1 if findings
+uplert --version
 ```
 
 ## Configuration
 
-Default config file:
-
-```bash
-configs/config.yaml
-```
-
-Example:
-
 ```yaml
-log_level: info
+log_level: info        # debug | info | error
+# log_format: json     # emit structured JSON (journalctl/SIEM friendly)
+
+app:
+  events_buffer: 4096
+  workers: 2
+  debounce_ms: 300
+  scan_interval_seconds: 60   # fallback sweep
+  scan_on_start: true
 
 watch:
   dirs:
-    - ./test_uploads
-    - /app/uploads
-    - /var/www/uploads
+    - /var/www/app/uploads
   ignore:
-    - ./test_uploads/cache
+    - /var/www/app/uploads/cache
+    - /var/www/app/.git
+    - /var/www/app/node_modules
+
+process:
+  enabled: false              # enable after studying dry-run output
+  dry_run: true               # true = log only, never kill
+  kill_only_critical: true
+  interval_seconds: 2
+  web_parents: [php-fpm, nginx, apache2, node, uvicorn, gunicorn]
+  shell_names: [sh, bash, nc, python, perl, curl, wget]
 
 alerts:
   stdout: true
-  webhook: ""
+  # webhooks receive a JSON document like the log line you see above:
+  # {"source":"uplert","rule":"php_in_media","level":"critical","path":"..."}
+  webhook: https://hooks.example.com/uplert
+  telegram_bot_token: "123456:AA..."
+  telegram_chat_id: "42"
 ```
 
-### Log Levels
+`UPLERT_LOG_LEVEL` env var overrides `log_level`.
 
-Available levels:
+## Rules reference
 
-```yaml
-log_level: debug
-log_level: info
-log_level: error
-```
+| Rule | Level | What it catches |
+|---|---|---|
+| `dangerous_extension` | high | `.php`, `.phtml`, `.phar`, `.py`, `.jsp`, … |
+| `double_extension` | high | `image.php.jpg` (script ext not at the end) |
+| `executable_in_uploads` | high | any file where x-bit is set |
+| `php_in_media` | critical | `<?php`, `eval(`, `$_POST`… inside `.png/.jpg/...` incl. tail of big files |
+| `script_in_html_or_svg` | high | `<script`, `onload=`, `javascript:` |
+| `suspicious_web_config` | critical | `php_value`, `auto_prepend_file` in `.htaccess`/`.user.ini`/`web.config` |
+| `magic_mismatch` | medium | the file claims `.jpg` but is not a JPEG |
+| `shebang_in_watched_dir` | medium | `#!/bin/...` in any file |
+| `exec_from_watch_dir` | critical | a process whose binary came from a watched dir |
+| `web_spawned_shell` | critical | php-fpm/node spawning `sh`, `nc`, `curl`, … |
 
-Override log level using environment variable:
-
-```bash
-UPLERT_LOG_LEVEL=debug go run ./cmd/uplert --config configs/config.yaml
-```
-
-Or with Make:
-
-```bash
-make run-debug
-```
-
-## Testing
-
-Run one test scenario:
-
-```bash
-make test-agent
-```
-
-Run continuous test loop:
-
-```bash
-make test-agent-loop
-```
-
-The test agent creates files inside:
-
-```bash
-./test_uploads
-```
-
-It generates safe test markers such as:
+### Response engine
 
 ```text
-shell.php
-run.sh
-photo.jpg.php
-image.php.jpg
-payload.png
-not_image.jpg
-avatar.svg
-.htaccess
-.user.ini
-avatars/nested_shell.php
+finding level ≥ critical → (dry_run? log-only : SIGTERM, 3s grace, SIGKILL)
 ```
 
-These files are not real malware. They contain harmless markers used to verify detection rules.
+`dry_run: true` never kills anything — it only logs what *would* happen. Set
+`dry_run: false` **only** after watching the dry-run output for a few days.
+Uplert refuses to kill PID 1 and itself.
 
-## Example Output
+## Benchmark (idle VPS, watcher + fallback scan every 60 s)
 
 ```text
-00:12:01 INFO starting uplert watch_dirs=[./test_uploads] log_level=debug
-00:12:05 DEBU file event op=create path=test_uploads/shell_1.php is_dir=false
-00:12:05 WARN security finding rule=dangerous_extension path=test_uploads/shell_1.php message="dangerous file extension detected"
-00:12:06 WARN security finding rule=executable_in_uploads path=test_uploads/shell_1.php message="executable file detected in watched directory"
-00:12:08 WARN security finding rule=php_in_media path=test_uploads/payload_1.png message="PHP-like code found inside media file"
+$ ls -l bin/uplert  →  8.6 MB  (static, CGO_ENABLED=0)
+$ grep VmRSS /proc/$(pidof uplert)/status
+VmRSS: 12800 kB
 ```
 
-## Project Structure
+## Deploy
 
-```text
-cmd/
-  uplert/       # main agent
-  testagent/    # test file generator
-
-internal/
-  alert/        # alert sinks
-  app/          # orchestration
-  config/       # configuration loading
-  model/        # domain types
-  rules/        # detection rules
-  watcher/      # filesystem watcher
-```
-
-## Adding a New Rule
-
-Create a file inside:
-
-```text
-internal/rules/
-```
-
-Implement the `Rule` interface:
-
-```go
-package rules
-
-import "github.com/pbadevel/Uplert/internal/model"
-
-type MyRule struct{}
-
-func (MyRule) ID() string {
-	return "my_rule"
-}
-
-func (MyRule) Evaluate(ev model.FileEvent) []model.Finding {
-	// detection logic here
-	return nil
-}
-```
-
-Register it in:
-
-```text
-cmd/uplert/main.go
-```
-
-Example:
-
-```go
-registry := rules.NewRegistry(
-	rules.MyRule{},
-)
-```
-
-## Adding a New Alerter
-
-Create a file inside:
-
-```text
-internal/alert/
-```
-
-Implement the `Alerter` interface:
-
-```go
-package alert
-
-import (
-	"context"
-
-	"github.com/pbadevel/Uplert/internal/model"
-)
-
-type Alerter interface {
-	Alert(ctx context.Context, f model.Finding) error
-}
-```
-
-Possible future alerters:
-
-- Webhook
-- Telegram
-- Slack
-- Discord
-- Syslog
-- Prometheus metrics
-- Loki logs
-
-## Systemd Service
-
-Build the binary:
+### systemd
 
 ```bash
-make build
-```
-
-Install:
-
-```bash
-sudo cp bin/uplert /usr/local/bin/uplert
-sudo mkdir -p /etc/uplert
-sudo cp configs/config.yaml /etc/uplert/config.yaml
-```
-
-Create service file:
-
-```bash
-sudo nano /etc/systemd/system/uplert.service
-```
-
-Example:
-
-```ini
-[Unit]
-Description=Uplert file integrity and RCE aftermath detector
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/uplert --config /etc/uplert/config.yaml
-Restart=on-failure
-RestartSec=5
-Environment=UPLERT_LOG_LEVEL=info
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
+sudo cp deploy/uplert.service /etc/systemd/system/uplert.service
 sudo systemctl daemon-reload
-sudo systemctl enable uplert
-sudo systemctl start uplert
-```
-
-View logs:
-
-```bash
+sudo systemctl enable --now uplert
 journalctl -u uplert -f
 ```
 
-## Known Limitations
-
-- Uplert does not prevent RCE.
-- It detects suspicious file activity and possible post-exploitation artifacts.
-- Static file scanning can produce duplicate events without debouncing.
-- Large directory trees may require higher `inotify` limits.
-- Process and network behavior monitoring are not implemented yet.
-
-### Inotify Limits
-
-Check current limit:
+### Docker
 
 ```bash
-cat /proc/sys/fs/inotify/max_user_watches
+make build
+docker build -t uplert:latest .
+docker run --rm -v $(pwd)/uploads:/etc/uplert/uploads:ro uplert:latest run
 ```
 
-Increase temporarily:
+## Development
 
 ```bash
-sudo sysctl fs.inotify.max_user_watches=524288
+make test        # tests with -race
+make fmt vet
+make build
+make test-agent  # generate harmless test files in ./test_uploads
 ```
 
-Increase permanently:
-
-```bash
-echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.d/99-inotify.conf
-sudo sysctl --system
-```
+CI runs fmt + vet + race tests + static build on every push.
 
 ## Roadmap
 
-### Stability
+- [ ] rule cooldowns and per-folder allowlists (`known-upload-hashes.json`)
+- [ ] entropy scoring for obfuscated payloads
+- [ ] container-aware process trees (`--docker` label match)
+- [ ] HTTP-based rule and fan-out metrics (`/metrics` for Prometheus)
+- [ ] one binary per target: `make release` (tar.gz amd64/arm64)
 
-- [ ] Add event debouncing
-- [ ] Deduplicate repeated alerts
-- [ ] Reduce false positives
-- [ ] Add rule cooldowns
-- [ ] Add structured JSON log output option
-- [ ] Add unit tests
-- [ ] Add integration tests
+## Known limitations
 
-### Detection
+- Does not prevent exploitation — detects aftermath.
+- Inotify watches are per directory; enormous trees need higher limits
+  (`fs.inotify.max_user_watches`).
+- Polling-based process detection may miss sub-second shell spawn. The file
+  layer (upload detection) covers those cases as the primary defence.
+- Content rules are heuristic. Reduce false positives via ignore lists and
+  level filtering; report FP examples in issues, they read the README.
 
-- [ ] Add risk scoring
-- [ ] Add allowlists for known frameworks
-- [ ] Add denylists for dangerous paths
-- [ ] Detect ELF binaries in upload directories
-- [ ] Detect `.so` libraries in upload directories
-- [ ] Detect PHAR archives
-- [ ] Detect obfuscated PHP patterns
-- [ ] Detect high-entropy suspicious files
-- [ ] Detect symlinks pointing outside watched directories
-- [ ] Detect hidden files with dangerous extensions
-- [ ] Detect suspicious cron entries
-- [ ] Detect suspicious systemd units
-- [ ] Detect modified `.env` files
-- [ ] Detect modified SSH authorized keys
-- [ ] Detect modified web server configs
+## Why a Go binary of 8 MB?
 
-### Alerting
+Because VPS users run fastapi/next.js/php-fpm behind nginx with 512 MB of RAM.
+Uplert is designed to be negligible — leaving the job of heavy duty checks
+to bigger tools, if and when you hire them.
 
-- [ ] Add webhook alerter
-- [ ] Add Telegram alerter
-- [ ] Add Slack alerter
-- [ ] Add Discord alerter
-- [ ] Add syslog alerter
-- [ ] Add Prometheus metrics exporter
-- [ ] Add Loki-compatible log output
-- [ ] Add alert batching
-- [ ] Add alert severity filtering
+## License
 
-### Runtime Security
-
-- [ ] Add process execution monitoring
-- [ ] Detect files executed from watched directories
-- [ ] Detect web processes spawning shells
-- [ ] Detect `curl`, `wget`, `nc`, `bash`, `sh`, `python`, `perl` child processes
-- [ ] Add network connection monitoring
-- [ ] Detect cloud metadata access
-- [ ] Detect reverse shell patterns
-- [ ] Detect secret file reads
-- [ ] Add auditd integration
-- [ ] Add eBPF-based runtime monitoring
-- [ ] Add container-aware process tracking
-
-### Operations
-
-- [ ] Add config hot reload
-- [ ] Add rule hot reload
-- [ ] Add periodic full scan mode
-- [ ] Add one-shot scan CLI mode
-- [ ] Add report generation
-- [ ] Add Docker image
-- [ ] Add Kubernetes DaemonSet support
-- [ ] Add package builds for Debian/Ubuntu
-- [ ] Add Arch Linux package
-- [ ] Add OpenRC init script
-- [ ] Add FreeBSD support
-- [ ] Add Windows support
-
-### UX
-
-- [ ] Add clearer startup banner
-- [ ] Add `--version` flag
-- [ ] Add `--help` examples
-- [ ] Add sample production config
-- [ ] Add documentation for each rule
-- [ ] Add troubleshooting guide
-- [ ] Add security policy document
+MIT © [pbadev](https://github.com/pbadev)

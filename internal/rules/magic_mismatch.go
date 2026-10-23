@@ -20,7 +20,8 @@ func (MagicMismatch) ID() string {
 func (r MagicMismatch) Evaluate(ev model.FileEvent) []model.Finding {
 	if ev.Op != model.OpCreate &&
 		ev.Op != model.OpWrite &&
-		ev.Op != model.OpRename {
+		ev.Op != model.OpRename &&
+		ev.Op != model.OpScan {
 		return nil
 	}
 

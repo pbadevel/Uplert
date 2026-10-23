@@ -15,7 +15,8 @@ func (ExecutableInUploads) ID() string {
 func (ExecutableInUploads) Evaluate(ev model.FileEvent) []model.Finding {
 	if ev.Op != model.OpCreate &&
 		ev.Op != model.OpChmod &&
-		ev.Op != model.OpRename {
+		ev.Op != model.OpRename &&
+		ev.Op != model.OpScan {
 		return nil
 	}
 
