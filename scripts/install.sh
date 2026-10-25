@@ -2,7 +2,7 @@
 # Uplert installer: downloads the latest release binary.
 set -eu
 
-REPO="pbadev/Uplert"
+REPO="pbadevel/Uplert"
 BINDIR="/usr/local/bin"
 CONFDIR="/etc/uplert"
 

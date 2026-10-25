@@ -59,7 +59,7 @@ func Banner(version string) string {
 	b.WriteString("\n")
 
 	b.WriteString("  " + ansiGreen + "made by " + ansiBold + "pbadev" + ansiReset)
-	b.WriteString("  " + ansiDim + "https://github.com/pbadev" + ansiReset)
+	b.WriteString("  " + ansiDim + "https://github.com/pbadevel" + ansiReset)
 	b.WriteString("\n\n")
 
 	return b.String()

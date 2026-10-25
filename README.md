@@ -3,7 +3,7 @@
 <p align="center">
   <b>Lightweight webshell &amp; RCE aftermath detector for Linux servers.</b><br>
   One static binary. No eBPF. No SIEM. No signature databases.<br>
-  <sub>made by <b>@pbadev</b></sub>
+  <sub>made by <b>@pbadevel</b></sub>
 </p>
 
 ---
@@ -52,14 +52,15 @@ install **now, on a cheap VPS**, while nobody signed off on a SIEM.
 - ✅ **Response engine**: dry-run by default, explicit opt-in for real kills
 - ✅ **Alerts**: colored stdout, JSON, webhook, Telegram bot
 - ✅ **One-shot scan**: `uplert scan` for CI and cron jobs
-- ✅ **TUI menu**: arrow keys, live dashboard (see below)
+- ✅ **TUI menu**: arrow keys, inline settings editor, live "made by" banner
+- ✅ **CLI flag overrides**: `uplert run -w 4 -l debug -W /srv/uploads --webhook ...`
 - ✅ **systemd unit, Docker image, install script**
 
 ## Quick Start
 
 ```bash
 # 1. download & install
-curl -fsSL https://raw.githubusercontent.com/pbadev/Uplert/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/pbadevel/Uplert/main/scripts/install.sh | sh
 
 # 2. point it at your uploads
 sudo $EDITOR /etc/uplert/config.yaml
@@ -77,7 +78,7 @@ sudo systemctl enable --now uplert
 From source:
 
 ```bash
-git clone https://github.com/pbadev/Uplert
+git clone https://github.com/pbadevel/Uplert
 cd Uplert && make build
 ./bin/uplert run --config configs/config.yaml
 ```
@@ -90,8 +91,9 @@ dependencies, keyboard only:
 ```text
  ▸ ▶  Run agent (watch & alert)
    🔎 One-shot scan
-   🧪 Run test agent
-   ✏  Show config
+   🧪 Run test agent       harmless marker files (+ live kill demo)
+   ⚙  Config: edit settings  inline editor, ♻ reset to defaults
+   📄 Show config file
    ⭘ Exit
 ```
 
@@ -101,8 +103,10 @@ In systemd/Docker contexts (no TTY) it runs as a headless agent.
 ## CLI
 
 ```text
-uplert run     agent loop (systemd builds on this)
-uplert scan    one-shot scan, exit code 1 if findings
+uplert run      agent loop (systemd builds on this)
+uplert scan     one-shot scan, exit code 1 if findings
+uplert test     write harmless marker files into the first watch dir
+uplert test -spawn   …and start a live actor process for the kill demo
 uplert --version
 ```
 
@@ -158,7 +162,7 @@ alerts:
 | `suspicious_web_config` | critical | `php_value`, `auto_prepend_file` in `.htaccess`/`.user.ini`/`web.config` |
 | `magic_mismatch` | medium | the file claims `.jpg` but is not a JPEG |
 | `shebang_in_watched_dir` | medium | `#!/bin/...` in any file |
-| `exec_from_watch_dir` | critical | a process whose binary came from a watched dir |
+| `exec_from_watch_dir` | critical | a process whose exe **or working directory** is a watched dir (catches scripts run via `/bin/sh`, `python3`) |
 | `web_spawned_shell` | critical | php-fpm/node spawning `sh`, `nc`, `curl`, … |
 
 ### Response engine
@@ -169,7 +173,10 @@ finding level ≥ critical → (dry_run? log-only : SIGTERM, 3s grace, SIGKILL)
 
 `dry_run: true` never kills anything — it only logs what *would* happen. Set
 `dry_run: false` **only** after watching the dry-run output for a few days.
-Uplert refuses to kill PID 1 and itself.
+Uplert refuses to kill PID 1 and itself. On a successful kill the console
+shows a red `💀 killed …` line and a one-shot notice (`process_killed`) goes
+out to webhook/Telegram. Children of the killed process are terminated too,
+so a spawn loop does not keep writing files.
 
 ## Benchmark (idle VPS, watcher + fallback scan every 60 s)
 
@@ -180,6 +187,23 @@ VmRSS: 12800 kB
 ```
 
 ## Deploy
+
+### CLI flag overrides
+
+Flags take precedence over the YAML file (only on this run, file untouched):
+
+```bash
+uplert run -c /etc/uplert/config.yaml -w 4 -l debug --process
+uplert run --webhook https://hooks.example.com/uplert -W /srv/uploads -I /srv/uploads/cache
+uplert run --kill # switch from dry-run to real kills
+```
+
+The same settings can be edited without the console: in the TUI open
+**⚙ Config: edit settings**, pick a field, type the value (short inline hints
+are shown for each), then 💾 Save — the file is validated before writing.
+`♻ Reset to defaults` restores factory values but keeps your watch dirs and
+alerts. Press `e` in the value prompt to clear an optional value
+(webhook, telegram, scan interval), `Esc` cancels.
 
 ### systemd
 
@@ -204,7 +228,16 @@ docker run --rm -v $(pwd)/uploads:/etc/uplert/uploads:ro uplert:latest run
 make test        # tests with -race
 make fmt vet
 make build
-make test-agent  # generate harmless test files in ./test_uploads
+make test-agent          # marker files in ./test_uploads
+make test-agent-loop     # rounds every 3s (live watcher demo)
+```
+
+A quick end-to-end kill test:
+
+```bash
+./bin/uplert run -W /opt/honeypot --process --kill -l info   # terminal 1
+./bin/uplert test -W /opt/honeypot -spawn                    # terminal 2
+# → terminal 1 shows a red💀 "killed pid=…" and a Telegram/webhook notice fires
 ```
 
 CI runs fmt + vet + race tests + static build on every push.
@@ -235,4 +268,4 @@ to bigger tools, if and when you hire them.
 
 ## License
 
-MIT © [pbadev](https://github.com/pbadev)
+MIT © [pbadevel](https://github.com/pbadevel)

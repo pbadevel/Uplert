@@ -60,10 +60,18 @@ type Watch struct {
 }
 
 type Alerts struct {
-	Stdout      bool   `yaml:"stdout"`
+	// Stdout mirrors the console log of findings. It is enabled unless
+	// explicitly set to false in YAML (hence the pointer).
+	Stdout      *bool  `yaml:"stdout"`
 	Webhook     string `yaml:"webhook"`
 	Telegram    string `yaml:"telegram_bot_token"`
 	TelegramCID string `yaml:"telegram_chat_id"`
+}
+
+// ConsoleAlerts reports whether findings should also hit the console
+// log. Default: true.
+func (a *Alerts) ConsoleEnabled() bool {
+	return a.Stdout == nil || *a.Stdout
 }
 
 func Load(path string) (*Config, error) {
@@ -88,6 +96,11 @@ func Load(path string) (*Config, error) {
 	applyDefaults(&cfg)
 
 	return &cfg, nil
+}
+
+// Validate re-checks a (possibly edited) config.
+func (c *Config) Validate() error {
+	return c.validate()
 }
 
 func (c *Config) validate() error {
@@ -152,6 +165,13 @@ func applyDefaults(cfg *Config) {
 			"python", "python3", "perl", "curl", "wget",
 		}
 	}
+}
+
+func Default() Config {
+	var cfg Config
+	applyDefaults(&cfg)
+
+	return cfg
 }
 
 func (c *Config) ProcessEnabled() bool {

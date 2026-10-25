@@ -1,54 +1,47 @@
-log_level: info
-# log_format: json   # use json for journald/SIEM collectors
-
+# uplert config (saved by the interactive editor)
 app:
-  events_buffer: 4096
-  workers: 2
-  debounce_ms: 300
-  scan_interval_seconds: 60
-  scan_on_start: true
-
+    events_buffer: 4096
+    workers: 2
+    debounce_ms: 300
+    scan_interval_seconds: 0
+    scan_on_start: false
 process:
-  # disabled by default; enable only after watching dry-run output
-  enabled: false
-  dry_run: true
-  kill_only_critical: true
-  interval_seconds: 2
-  web_parents:
-    - php-fpm
-    - php
-    - nginx
-    - apache2
-    - httpd
-    - node
-    - uvicorn
-    - gunicorn
-  shell_names:
-    - sh
-    - bash
-    - dash
-    - zsh
-    - nc
-    - ncat
-    - socat
-    - python
-    - python3
-    - perl
-    - curl
-    - wget
-
+    enabled: true
+    dry_run: false
+    kill_only_critical: null
+    interval_seconds: 2
+    web_parents:
+        - php-fpm
+        - php
+        - nginx
+        - apache2
+        - httpd
+        - node
+        - uvicorn
+        - gunicorn
+        - python3
+    shell_names:
+        - sh
+        - bash
+        - dash
+        - zsh
+        - nc
+        - ncat
+        - socat
+        - python
+        - python3
+        - perl
+        - curl
+        - wget
+log_level: info
+log_format: text
 watch:
-  # typical VPS web app layout
-  dirs:
-    - ./uploads
-  ignore:
-    - ./uploads/cache
-    - ./.git
-    - ./node_modules
-    - ./bin
-
+    dirs:
+        - ./test_uploads
+    ignore:
+        - '[]'
 alerts:
-  stdout: true
-  # webhook: https://hooks.example.com/uplert
-  # telegram_bot_token: "123456:AA..."
-  # telegram_chat_id: "42"
+    stdout: true
+    webhook: ""
+    telegram_bot_token: 8709295146:AAEgk8s76ZFu53NJRFGvOLspT5LOFxdzLzM
+    telegram_chat_id: "1060834219"

@@ -42,6 +42,7 @@ type ProcessEvent struct {
 	Pid        int32
 	Name       string
 	Exe        string
+	Cwd        string
 	ParentPid  int32
 	ParentName string
 	Time       time.Time

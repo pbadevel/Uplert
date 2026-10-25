@@ -16,23 +16,30 @@ func (ExecFromWatchDir) ID() string {
 }
 
 func (r ExecFromWatchDir) Evaluate(ev model.ProcessEvent) []model.Finding {
-	if ev.Exe == "" {
-		return nil
-	}
+	// The process may legitimately run a system binary (/bin/sh,
+	// python3) — the red flag is its working directory or the exe
+	// path being inside a watched upload dir.
+	candidates := []string{ev.Exe, ev.Cwd}
 
-	exe := filepath.Clean(ev.Exe)
+	for _, cand := range candidates {
+		if cand == "" {
+			continue
+		}
 
-	for _, dir := range r.Dirs {
-		dir = filepath.Clean(dir)
-		if exe == dir || strings.HasPrefix(exe, dir+string(filepath.Separator)) {
-			return []model.Finding{
-				{
-					RuleID:  r.ID(),
-					Level:   model.LevelCritical,
-					Message: "process executed from watched directory",
-					Path:    ev.Exe,
-					Time:    ev.Time,
-				},
+		exe := filepath.Clean(cand)
+
+		for _, dir := range r.Dirs {
+			dir = filepath.Clean(dir)
+			if exe == dir || strings.HasPrefix(exe, dir+string(filepath.Separator)) {
+				return []model.Finding{
+					{
+						RuleID:  r.ID(),
+						Level:   model.LevelCritical,
+						Message: "process executed from watched directory",
+						Path:    cand,
+						Time:    ev.Time,
+					},
+				}
 			}
 		}
 	}

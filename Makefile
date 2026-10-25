@@ -25,7 +25,7 @@ test-agent:
 	go run ./cmd/testagent -dir ./test_uploads -once -clean
 
 test-agent-loop:
-	go run ./cmd/testagent -dir ./test_uploads -interval 3s -step-delay 200ms
+	go run ./cmd/testagent -dir ./test_uploads -interval 3s
 
 fmt:
 	gofmt -l -w ./cmd ./internal

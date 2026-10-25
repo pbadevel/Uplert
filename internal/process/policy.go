@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,15 +116,83 @@ func KillProcess(pid int32) error {
 
 	for time.Now().Before(deadline) {
 		if !isAlive(pid) {
+			killChildren(pid) // script may have spawned helpers
 			return nil
 		}
 
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	killChildren(pid)
+
 	if err := syscall.Kill(int(pid), syscall.SIGKILL); err != nil {
 		return fmt.Errorf("send SIGKILL to %d: %w", pid, err)
 	}
 
 	return nil
+}
+
+// killChildren terminates child processes that the target spawned.
+// Killing only the parent would leave, say, a php runner writing
+// malicious files in a loop.
+func killChildren(pid int32) {
+	kids := childPids(pid)
+
+	for _, kid := range kids {
+		// Never touch our own process group.
+		if sysPgid(kid) == syscall.Getpgrp() {
+			_ = syscall.Kill(int(kid), syscall.SIGTERM)
+			continue
+		}
+
+		_ = syscall.Kill(int(kid), syscall.SIGKILL)
+	}
+}
+
+// childPids lists direct children by scanning ppid in /proc.
+func childPids(parent int32) []int32 {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+
+	var out []int32
+
+	for _, e := range entries {
+		raw := e.Name()
+
+		pid, err := strconv.Atoi(raw)
+		if err != nil {
+			continue
+		}
+
+		data, err := os.ReadFile("/proc/" + raw + "/stat")
+		if err != nil {
+			continue
+		}
+
+		// stat: pid (comm) state ppid ...
+		open := strings.LastIndex(string(data), ")")
+
+		fields := strings.Fields(string(data)[open+2:])
+		if len(fields) < 2 {
+			continue
+		}
+
+		ppid, err := strconv.Atoi(fields[1])
+		if err == nil && ppid == int(parent) {
+			out = append(out, int32(pid))
+		}
+	}
+
+	return out
+}
+
+func sysPgid(pid int32) int {
+	g, err := syscall.Getpgid(int(pid))
+	if err != nil {
+		return 0
+	}
+
+	return g
 }

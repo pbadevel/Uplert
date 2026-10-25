@@ -103,13 +103,24 @@ func (d *Detector) scan(ctx context.Context, events chan<- model.ProcessEvent) {
 
 		// Candidate 1: binary inside a watch dir.
 		// Candidate 2: child of a web process.
-		if d.exeInWatchDir(exe) || d.WebParents[parentName] {
+		// Candidate 3: working directory inside a watch dir — covers
+		// uploaded scripts run via a system interpreter (/bin/sh,
+		// python3), where exe points outside the uploads.
+
+		cwd, _ := p.Cwd()
+
+		isCandidate := d.exeInWatchDir(exe) ||
+			d.WebParents[parentName] ||
+			d.cwdInWatchDir(cwd)
+
+		if isCandidate {
 			if !d.markSeen(p.Pid, now) {
 				continue // already reported recently
 			}
 
 			if !send(ctx, events, model.ProcessEvent{
 				Pid: p.Pid, Name: name, Exe: exe,
+				Cwd:       cwd,
 				ParentPid: parentPid, ParentName: parentName,
 				Time: now,
 			}) {
@@ -188,6 +199,10 @@ func (d *Detector) exeInWatchDir(exe string) bool {
 	}
 
 	return false
+}
+
+func (d *Detector) cwdInWatchDir(cwd string) bool {
+	return d.exeInWatchDir(cwd) // same prefix logic
 }
 
 func send(ctx context.Context, ch chan<- model.ProcessEvent, ev model.ProcessEvent) bool {

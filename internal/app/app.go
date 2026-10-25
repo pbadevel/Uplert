@@ -16,6 +16,7 @@ import (
 	"github.com/pbadevel/Uplert/internal/model"
 	"github.com/pbadevel/Uplert/internal/process"
 	"github.com/pbadevel/Uplert/internal/rules"
+	"github.com/pbadevel/Uplert/internal/ui"
 	"github.com/pbadevel/Uplert/internal/watcher"
 )
 
@@ -41,6 +42,19 @@ type App struct {
 	seenMu       sync.Mutex
 	seenFindings map[string]time.Time
 	findingTTL   time.Duration
+
+	// redLine renders successful kills in red (text logs only).
+	redLine bool
+}
+
+// RedKills enables the red console line for successful kills; it is
+// a no-op when stdout is not a human terminal (journalctl, Docker).
+func (a *App) RedKills() {
+	if !ui.IsTerminal(os.Stdout) {
+		return
+	}
+
+	a.redLine = true
 }
 
 func New(
@@ -560,7 +574,31 @@ func (a *App) processWorkerLoop(
 				if action != process.ActionNone {
 					go func(pid int32, finding model.Finding, act process.Action) {
 						if msg := a.policy.Execute(act, finding, pid); msg != "" {
-							a.log.Info("response action", "detail", msg)
+							switch {
+							case strings.HasPrefix(msg, "killed"):
+								// Red highlight for the human watching
+								// the console (charmlog passes raw
+								// ANSI through; JSON stays clean).
+								if a.redLine {
+									message := "\x1b[31m\x1b[3m💀 " + msg + "\x1b[0m"
+									a.log.Info(message, "pid", pid, "rule", finding.RuleID)
+								} else {
+									a.log.Info("response action", "detail", msg)
+								}
+
+								// One-shot Telegram/webhook notice
+								// about the neutralized process.
+								notice := finding
+								notice.RuleID = "process_killed"
+								notice.Level = model.LevelHigh
+								notice.Message = "☠️ malicious process terminated"
+								notice.Path = finding.Path
+
+								a.dispatch(ctx, notice)
+
+							default:
+								a.log.Info("response action", "detail", msg)
+							}
 						}
 					}(ev.Pid, far, action)
 				}

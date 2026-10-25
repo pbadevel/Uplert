@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pbadevel/Uplert/internal/model"
@@ -32,17 +34,20 @@ func NewTelegram(token, chatID string) *Telegram {
 }
 
 func (t *Telegram) Alert(ctx context.Context, f model.Finding) error {
+	// Telegram carries actionable alerts only: medium and above.
+	if f.Level == model.LevelInfo {
+		return nil
+	}
+
 	apiURL := fmt.Sprintf(
 		"https://api.telegram.org/bot%s/sendMessage",
 		url.PathEscape(t.token),
 	)
 
 	payload, err := json.Marshal(map[string]any{
-		"chat_id": t.chatID,
-		"text": fmt.Sprintf(
-			"[uplert] %s %s\nrule: %s\npath: %s\n%s",
-			f.Level, f.Time.Format("15:04:05"), f.RuleID, f.Path, f.Message,
-		),
+		"chat_id":    t.chatID,
+		"text":       formatTelegram(f),
+		"parse_mode": "HTML",
 		"disable_notification": f.Level != model.LevelCritical &&
 			f.Level != model.LevelHigh,
 	})
@@ -73,4 +78,44 @@ func (t *Telegram) Alert(ctx context.Context, f model.Finding) error {
 	}
 
 	return nil
+}
+
+// formatTelegram renders a compact HTML alert card.
+func formatTelegram(f model.Finding) string {
+	// Icon + level text per severity.
+	head, level := "🟡 ", "MEDIUM"
+
+	switch f.Level {
+	case model.LevelCritical:
+		head, level = "🔴 ", "CRITICAL"
+	case model.LevelHigh:
+		head, level = "🟠 ", "HIGH"
+	case model.LevelInfo:
+		head, level = "⚪ ", "info"
+	}
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s<b>uplert alert</b> · %s\n", head, level)
+	fmt.Fprintf(&b, "<code>%s</code>\n", html.EscapeString(f.RuleID))
+	fmt.Fprintf(&b, "%s\n", html.EscapeString(f.Message))
+
+	if f.Path != "" {
+		fmt.Fprintf(&b, "📁 <code>%s</code>\n",
+			html.EscapeString(shortPath(f.Path)))
+	}
+
+	fmt.Fprintf(&b, "🕒 %s", f.Time.Format("02 Jan 15:04:05"))
+	return b.String()
+}
+
+// shortPath trims very long paths to keep the message readable.
+func shortPath(path string) string {
+	const max = 96
+
+	if len(path) <= max {
+		return path
+	}
+
+	return "…" + path[len(path)-max:]
 }
